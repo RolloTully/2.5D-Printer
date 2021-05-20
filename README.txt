@@ -1,0 +1,1 @@
+This code is optomized for, tested and produced on a WANHAO DI3 using the after market skr1.4 turbo motherboard using trinamic stepper drivers  
