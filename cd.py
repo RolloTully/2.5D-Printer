@@ -19,14 +19,31 @@ class Plotter():
         self.serial_com = Serial_COM()
         self.offset_x = 0
         self.offset_y = 64
+        self.offset_z = 10
         self.Home()
+        self.Depth_cali(5,3)
     def Home(self):
         self.pen_position = False
         self.serial_com.Send('G28 X\r\n G28 Y\r\n G28 Z\r\nG90\r\n G1 F2000 Z5\r\nG1 F2000 X0 Y64\r\n')
+    def Depth_cali(self, Start, End):
+        self.y = 10
+        self.serial_com.Send('G0 Y '+str(self.offset_y)+'X 200 Z 10\r\n')
+        for self.depth in range(Start*10, End*10, -1):
+            print(self.depth)
+            self.serial_com.Send('G0 Y '+str(self.y+self.offset_y)+'X 140 Z'+str(self.depth/10)+'\r\n')
+            self.serial_com.Send('G0 Y '+str(self.y+self.offset_y)+'X 160 Z'+str(self.depth/10)+'\r\n')
+            self.y += 3
+            self.right = input("Is the line sufficent(y/n): ")
+            if self.right == "y":
+                self.offset_z = self.depth/10
+                break
+            self.pen_up()
+
+
     def pen_up(self):
         self.serial_com.Send('G0 Z 7\r\n')
     def pen_down(self):
-        self.serial_com.Send('G0 Z 4.4\r\n')
+        self.serial_com.Send('G0 Z'+str(self.offset_z)+'\r\n')
     def pen_load(self):
         self.colour = choice(["Red","Green","blue"])
 
@@ -37,14 +54,14 @@ class Plotter():
 
         self.points = np.where(region != 0)
         self.points = [[self.points[0][self.index],self.points[1][self.index]] for self.index in range(len(self.points[0]))]
-        self.serial_com.Send('G1 F7000 X'+str((self.points[0][0]/10)+self.offset_x)+' Y'+str((self.points[0][1]/10) + self.offset_y)+' Z 7'+'\r\nG0 Z 4.4\r\n')# move to the start of the curve
+        self.serial_com.Send('G1 F7000 X'+str((self.points[0][0]/10)+self.offset_x)+' Y'+str((self.points[0][1]/10) + self.offset_y)+' Z 7'+'\r\nG0 Z'+str(self.offset_z)+'\r\n')# move to the start of the curve
 
         for index in range(0,len(self.points)-1):
             self.x,self.y=self.points[index]
             self.x_next, self.y_next = self.points[index+1]
             if np.hypot(self.x-self.x_next,self.y-self.y_next) > 2:
                 #if the next point isnt imeadiatly adjacent to the currently point then it 'jumps' the gap
-                self.serial_com.Send('G0 F7000 X'+str((self.x/10)+self.offset_x)+' Y'+str((self.y/10) + self.offset_y)+' Z 4.4'+'\r\n')
+                self.serial_com.Send('G0 F7000 X'+str((self.x/10)+self.offset_x)+' Y'+str((self.y/10) + self.offset_y)+' Z '+str(self.offset_z)+'\r\n')
                 self.pen_up()
                 print("Up ")
                 print('G0 F2000 X '+str((self.x_next/10)+self.offset_x)+' Y '+str((self.y_next/10) + self.offset_y)+'\r\n')
@@ -54,7 +71,7 @@ class Plotter():
             else:
                 pass
 
-        self.command = 'G0 F7000 X'+str((self.points[len(self.points)-1][0]/10)+self.offset_x)+' Y'+str((self.points[len(self.points)-1][1]/10) + self.offset_y)+' Z 4.4'+'\r\n'
+        self.command = 'G0 F7000 X'+str((self.points[len(self.points)-1][0]/10)+self.offset_x)+' Y'+str((self.points[len(self.points)-1][1]/10) + self.offset_y)+' Z '+str(self.offset_z)+'\r\n'
         self.serial_com.Send(self.command)
         self.pen_up()
 
@@ -70,8 +87,8 @@ class Plotter():
                 self.serial_com.Send('G0 F2000 X '+str((self.x_next/10)+self.offset_x)+' Y '+str((self.y_next/10) + self.offset_y)+'\r\n')
                 self.pen_down()
             else:
-                self.serial_com.Send('G0 F7000 X'+str((self.x/10)+self.offset_x)+' Y'+str((self.y/10) + self.offset_y)+' Z 4.7'+'\r\n')
-        self.command = 'G1 F7000 X'+str((curve[len(curve)-1][0]/10)+self.offset_x)+' Y'+str((curve[len(curve)-1][1]/10) + self.offset_y)+' Z 4.4'+'\r\n'
+                self.serial_com.Send('G0 F7000 X'+str((self.x/10)+self.offset_x)+' Y'+str((self.y/10) + self.offset_y)+' Z '+str(self.offset_z)+'\r\n')
+        self.command = 'G1 F7000 X'+str((curve[len(curve)-1][0]/10)+self.offset_x)+' Y'+str((curve[len(curve)-1][1]/10) + self.offset_y)+' Z '+str(self.offset_z)+'\r\n'
         self.serial_com.Send(self.command)
         self.pen_up()
 
@@ -175,7 +192,7 @@ class Main():
             if self.curve != []:
                 self.plotter.Draw_curve(self.curve)
 
-        self.plotter.serial_com.Send("G1 Z7\r\nG1 X0 Y64\r\nG1 Z4.4\r\nG1 X136 Y64\r\nG1 X136 Y200\r\nG1 X0 Y200\r\n G1 X0 Y64\r\nG1 Z1000 Z7\r\n")
+        self.plotter.serial_com.Send("G1 Z7\r\nG1 X0 Y64\r\nG1 Z4\r\nG1 X136 Y64\r\nG1 X136 Y200\r\nG1 X0 Y200\r\n G1 X0 Y64\r\nG1 Z1000 Z7\r\n")
         self.region_masks = []
         for self.i in range(2,self.Rnum-1):
             if self.i!=self.max_area_index:
