@@ -24,14 +24,39 @@ class Plotter():
         self.pen_position = False
         self.serial_com.Send('G28 X\r\n G28 Y\r\n G28 Z\r\nG90\r\n G1 F2000 Z5\r\nG1 F2000 X0 Y64\r\n')
     def pen_up(self):
-        self.serial_com.Send('G1 Z 7\r\n')
+        self.serial_com.Send('G0 Z 7\r\n')
     def pen_down(self):
-        self.serial_com.Send('G1 Z 4.4\r\n')
-    def infill(self):
-        for x in range(0,136):
-            self.serial_com.Send('G0 F7000 X'+str((x)+self.offset_x)+' Y'+str(0 + self.offset_y)+' Z 4.4'+'\r\n')
-            self.serial_com.Send('G0 F7000 X'+str((0)+self.offset_x)+' Y'+str(x + self.offset_y)+' Z 4.4'+'\r\n')
+        self.serial_com.Send('G0 Z 4.4\r\n')
+    def pen_load(self):
+        self.colour = choice(["Red","Green","blue"])
 
+        self.serial_com.Send("G0 F1000 X0 Y0 Z100\r\n")
+        input("please insert "+self.colour)
+        self.serial_com.Send("G0 F1000 Z10\r\n")
+    def infill(self, region):
+
+        self.points = np.where(region != 0)
+        self.points = [[self.points[0][self.index],self.points[1][self.index]] for self.index in range(len(self.points[0]))]
+        self.serial_com.Send('G1 F7000 X'+str((self.points[0][0]/10)+self.offset_x)+' Y'+str((self.points[0][1]/10) + self.offset_y)+' Z 7'+'\r\nG0 Z 4.4\r\n')# move to the start of the curve
+
+        for index in range(0,len(self.points)-1):
+            self.x,self.y=self.points[index]
+            self.x_next, self.y_next = self.points[index+1]
+            if np.hypot(self.x-self.x_next,self.y-self.y_next) > 2:
+                #if the next point isnt imeadiatly adjacent to the currently point then it 'jumps' the gap
+                self.serial_com.Send('G0 F7000 X'+str((self.x/10)+self.offset_x)+' Y'+str((self.y/10) + self.offset_y)+' Z 4.4'+'\r\n')
+                self.pen_up()
+                print("Up ")
+                print('G0 F2000 X '+str((self.x_next/10)+self.offset_x)+' Y '+str((self.y_next/10) + self.offset_y)+'\r\n')
+                self.serial_com.Send('G0 F7000 X '+str((self.x_next/10)+self.offset_x)+' Y '+str((self.y_next/10) + self.offset_y)+'\r\n')
+                self.pen_down()
+                print("Down ")
+            else:
+                pass
+
+        self.command = 'G0 F7000 X'+str((self.points[len(self.points)-1][0]/10)+self.offset_x)+' Y'+str((self.points[len(self.points)-1][1]/10) + self.offset_y)+' Z 4.4'+'\r\n'
+        self.serial_com.Send(self.command)
+        self.pen_up()
 
     def Draw_curve(self,curve):
         self.serial_com.Send('G1 F7000 X'+str((curve[0][0]/10)+self.offset_x)+' Y'+str((curve[0][1]/10) + self.offset_y)+' Z 7'+'\r\n')# move to the start of the curve
@@ -88,10 +113,11 @@ class Main():
         self.curves = []
         self.x_max=1000
         self.y_max=1000
-
-        self.plotter.infill()
+        self.output = np.zeros((1360,1360))
+        self.mask = np.zeros((1360,1360))
         #self.init_frame_img("Test Image.jpg")
-        #self.Circle_Drawing()
+        #self.init_frame_circles()
+        self.Circle_Drawing()
 
     def init_frame_circles(self):
         self.output = np.zeros((1360,1360))
@@ -99,9 +125,6 @@ class Main():
         cv2.circle(self.output,(680,680),500,255,1)
         self.mask = np.zeros((1360,1360))
         cv2.circle(self.mask,(680,680),500,255,-1)
-        self.points = np.where(self.output!=0)
-        self.line_points=[[self.points[0][self.index],self.points[1][self.index]] for self.index in range(len(self.points[0]))]
-        self.curves.append(Curve(self.line_points))
 
     def init_frame_img(self,path):
         self.img = cv2.imread(path,0)
@@ -111,11 +134,11 @@ class Main():
 
     def Circle_Drawing(self):
         print("Computing path... Please wait.")
-        self.points = np.where(self.output!=0)
-        self.line_points=[[self.points[0][self.index],self.points[1][self.index]] for self.index in range(len(self.points[0]))]
-        self.curves.append(Curve(self.line_points))
+        #self.points = np.where(self.output!=0)
+        #self.line_points=[[self.points[0][self.index],self.points[1][self.index]] for self.index in range(len(self.points[0]))]
+        #self.curves.append(Curve(self.line_points))
 
-        for cir in tqdm(range(200)):
+        for cir in tqdm(range(31)):
             '''forces all sources to lie on the boundary of a  previous circle thus reducing cramming'''
             #self.source_points = np.where(self.output > 0)
             #self.new_points = [[self.source_points[0][self.index],self.source_points[1][self.index]] for self.index in range(len(self.source_points[0]))]
@@ -136,27 +159,32 @@ class Main():
             self.output[self.output!=0.0]=255
             cv2.imshow("output",self.output)
             cv2.waitKey(1)
-        cv2.imshow("output",cv2.resize(self.output,(900,900)))
+        cv2.imshow("output",255-self.output)
         cv2.waitKey(0)
         self.lables, self.Rnum = label(255-self.output)
-        self.curve_centres = [c.centre for c in self.curves]
-        #print(self.label_mask_centres)
-        print(self.curve_centres)
-        #print(self.Rnum)
-        self.region_masks = []
-        for self.i in range(0,self.Rnum-1):
-            self.region_mask = cv2.inRange(self.lables,self.i,self.i)
-            self.region_masks.append([np.mean(np.where(self.region_mask >0)),self.region_mask])
-            cv2.imshow("mask",self.region_mask)
-            cv2.waitKey(100)
+        self.areas = [np.count_nonzero(self.lables == self.i) for self.i in range(self.Rnum)]
+        self.max_area_index = np.argmax(self.areas)
+        print(self.areas)
 
 
-        self.plotter.pen_up()
+
+
+        #self.plotter.pen_up()
+
         for self.curve in tqdm(self.curves):
             if self.curve != []:
                 self.plotter.Draw_curve(self.curve)
-        self.plotter.serial_com.Send("G1 Z7\r\nG1 X0 Y64\r\nG1 Z4.4\r\nG1 X136 Y64\r\nG1 X136 Y200\r\nG1 X0 Y200\r\n G1 X0 Y64\r\nG1 Z1000 Z30\r\n")
 
+        self.plotter.serial_com.Send("G1 Z7\r\nG1 X0 Y64\r\nG1 Z4.4\r\nG1 X136 Y64\r\nG1 X136 Y200\r\nG1 X0 Y200\r\n G1 X0 Y64\r\nG1 Z1000 Z7\r\n")
+        self.region_masks = []
+        for self.i in range(2,self.Rnum-1):
+            if self.i!=self.max_area_index:
+                self.region_mask = cv2.inRange(self.lables,self.i,self.i)
+
+                cv2.imshow(" ",cv2.resize(self.region_mask,(900,900)))
+                cv2.waitKey(1000)
+                self.plotter.pen_load()
+                self.plotter.infill(self.region_mask)
 
 if __name__ == "__main__":
     Main()
