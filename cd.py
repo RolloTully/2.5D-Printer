@@ -27,7 +27,7 @@ class Plotter():
         self.serial_com.Send('G28 X\r\n G28 Y\r\n G28 Z\r\nG90\r\n G1 F2000 Z5\r\nG1 F2000 X0 Y64\r\n')
     def Depth_cali(self, Start, End):
         self.y = 10
-        self.serial_com.Send('G0 Y '+str(self.offset_y)+'X 200 Z 10\r\n')
+        self.serial_com.Send('G0 Y '+str(self.offset_y)+'X 130 Z 10\r\n')
         for self.depth in range(Start*10, End*10, -1):
             print(self.depth)
             self.serial_com.Send('G0 Y '+str(self.y+self.offset_y)+'X 140 Z'+str(self.depth/10)+'\r\n')
@@ -93,7 +93,7 @@ class Plotter():
         self.pen_up()
 
 class Curve(object):
-    def __init__(self, point_array):
+    def __init__(self, point_array, curve_start = None):
         self.points = point_array
         self.centre = np.mean(self.points,axis=0)
         self.mask = []
@@ -101,12 +101,18 @@ class Curve(object):
         self.order_points() # orders all points
 
 
+
     def order_points(self): # perfomrms curve reconstructipn so allow drawing
         ''' Fairly proud of this, just fairly simple curve reconstruction'''
         self.original_points = self.points.copy()
         self.index_order = []
-        self.distances = [np.sum(np.array([np.hypot(self.S_point[0]-self.E_point[0],self.S_point[1]-self.E_point[1])for self.E_point in self.points])) for self.S_point in tqdm(self.points)]
-        self.working_index  = np.argmax(self.distances)
+        if curve_start==None:
+            self.distances = [np.sum(np.array([np.hypot(self.S_point[0]-self.E_point[0],self.S_point[1]-self.E_point[1])for self.E_point in self.points])) for self.S_point in tqdm(self.points)]
+            self.working_index  = np.argmax(self.distances)
+        else:
+            self.distances = [np.hypot(self.S_point[0]-curve_start[0],self.S_point[1]-curve_start[1]) for self.S_point in tqdm(self.points)]
+            self.working_index  = np.argmax(self.distances)
+
         for x in tqdm(range(len(self.points))):
             self.index_order.append(self.working_index)
             self.distances = np.array([np.hypot(self.points[self.working_index][0]-self.point[0],self.points[self.working_index][1]-self.point[1])for self.point in self.points])
@@ -122,6 +128,30 @@ class Curve(object):
         return self.points[k]
     def __len__(self):
         return len(self.points)
+
+class Region(object):
+    def __init__(self, region):
+        self.region_mask = region
+
+    def Compute_Path(self):
+        self.layers = []
+        self.region_curves = []
+        '''Uses Edge detection to compute an efficent path'''
+        self.region_mask[self.region_mask != (0 or 0.0)]=255
+        self.region_mask[self.region_mask == (0 or 0.0)]=255
+        while np.any(np.where(self.region_mask ==222)):
+            self.outer_layer = cv2.Canny(self.region_mask)
+            self.region_mask = self.region_mask-self.outer_layer
+            self.layer_points = np.where(self.outer_layer>0)
+            self.paired_layer_points=[[self.layer_points[0][self.index],self.layer_points[1][self.index]] for self.index in range(len(self.layer_points[0]))]
+            self.layers.append(self.paired_layer_points)
+        self.first_curve = Curve(self.layer[0])
+        self.next_curve_start = self.first_curve.points[len(self.first_curve.points)]
+        self.region_curves.append(self.first_curve)
+        for self.index in range(1,len(self.layers)-1):
+            self.new_curve = Curve(self.layer[index],self.next_curve_start)
+            self.next_curve_start = self.new_curve.points[len(self.new_curve.points)]
+            self.region_curves.append(self.new_curve)
 
 
 class Main():
@@ -155,7 +185,7 @@ class Main():
         #self.line_points=[[self.points[0][self.index],self.points[1][self.index]] for self.index in range(len(self.points[0]))]
         #self.curves.append(Curve(self.line_points))
 
-        for cir in tqdm(range(31)):
+        for cir in tqdm(range(3)):
             '''forces all sources to lie on the boundary of a  previous circle thus reducing cramming'''
             #self.source_points = np.where(self.output > 0)
             #self.new_points = [[self.source_points[0][self.index],self.source_points[1][self.index]] for self.index in range(len(self.source_points[0]))]
@@ -194,7 +224,7 @@ class Main():
 
         self.plotter.serial_com.Send("G1 Z7\r\nG1 X0 Y64\r\nG1 Z4\r\nG1 X136 Y64\r\nG1 X136 Y200\r\nG1 X0 Y200\r\n G1 X0 Y64\r\nG1 Z1000 Z7\r\n")
         self.region_masks = []
-        for self.i in range(2,self.Rnum-1):
+        for self.i in range(0,self.Rnum-1):
             if self.i!=self.max_area_index:
                 self.region_mask = cv2.inRange(self.lables,self.i,self.i)
 
