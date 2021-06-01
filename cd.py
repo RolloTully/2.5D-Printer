@@ -1,5 +1,6 @@
 from scipy.ndimage import label, generate_binary_structure
 from random import randint,choice, triangular
+from scipy.integrate import odeint
 import numpy as np
 import cv2
 from tqdm import tqdm
@@ -17,11 +18,14 @@ class Serial_COM(object):
 class Plotter():
     def __init__(self):
         self.serial_com = Serial_COM()
-        self.offset_x = 0
-        self.offset_y = 64
-        self.offset_z = 10
+        self.offset_x = 26
+        self.offset_y = 47
+        self.offset_z = 7
         self.Home()
         self.Depth_cali(5,3)
+    def GoTo(self,x,y,z=10):
+        self.serial_com.Send('G0 F7000 X'+str(x+self.offset_x)+' Y '+str(y+self.offset_y)+' Z '+str(z+self.offset_z)+'\r\n')
+
     def Home(self):
         self.pen_position = False
         self.serial_com.Send('G28 X\r\n G28 Y\r\n G28 Z\r\nG90\r\n G1 F2000 Z5\r\nG1 F2000 X0 Y64\r\n')
@@ -38,10 +42,18 @@ class Plotter():
                 self.offset_z = self.depth/10
                 break
             self.pen_up()
+    def Spiral_level(self):
+        self.GoTo(150,150,20)
+        for self.theta in range(0,10000,1):
+            self.theta = (self.theta/100)*np.pi
+            self.r = 0.3*self.theta
+            self.x = self.r*np.cos(self.theta)
+            self.y = self.r*np.sin(self.theta)
+            self.GoTo(self.x+100,self.y+100,0)
 
 
     def pen_up(self):
-        self.serial_com.Send('G0 Z 7\r\n')
+        self.serial_com.Send('G0 Z 10\r\n')
     def pen_down(self):
         self.serial_com.Send('G0 Z'+str(self.offset_z)+'\r\n')
     def pen_load(self):
@@ -75,11 +87,24 @@ class Plotter():
         self.serial_com.Send(self.command)
         self.pen_up()
 
+    def Draw_Raw(self, curve):
+        self.serial_com.Send('G1 F7000 X'+str((curve[0][0]/10)+self.offset_x)+' Y'+str((curve[0][1]/10) + self.offset_y)+' Z 7'+'\r\n')# move to the start of the curve
+        self.pen_down() #places pen to start drawing the curve
+        for index in range(0,len(curve)-1):
+            self.x,self.y=curve[index]
+            self.serial_com.Send('G0 F7000 X '+str(self.x+self.offset_x)+' Y '+str(self.y + self.offset_y)+'\r\n')
+        self.command = 'G1 F7000 X'+str((curve[len(curve)-1][0]/10)+self.offset_x)+' Y'+str((curve[len(curve)-1][1]/10) + self.offset_y)+' Z '+str(self.offset_z)+'\r\n'
+        self.pen_up()
+        self.serial_com.Send(self.command)
+
+
+
     def Draw_curve(self,curve):
         self.serial_com.Send('G1 F7000 X'+str((curve[0][0]/10)+self.offset_x)+' Y'+str((curve[0][1]/10) + self.offset_y)+' Z 7'+'\r\n')# move to the start of the curve
         self.pen_down() #places pen to start drawing the curve
         for index in range(0,len(curve)-1):
             self.x,self.y=curve[index]
+            print("Moving to: ",self.x," ",self.y)
             self.x_next, self.y_next = curve[index+1]
             if np.hypot(self.x-self.x_next,self.y-self.y_next) > 2:
                 #if the next point isnt imeadiatly adjacent to the currently point then it 'jumps' the gap
@@ -94,6 +119,7 @@ class Plotter():
 
 class Curve(object):
     def __init__(self, point_array, curve_start = None):
+        self.curve_start = curve_start
         self.points = point_array
         self.centre = np.mean(self.points,axis=0)
         self.mask = []
@@ -106,11 +132,11 @@ class Curve(object):
         ''' Fairly proud of this, just fairly simple curve reconstruction'''
         self.original_points = self.points.copy()
         self.index_order = []
-        if curve_start==None:
+        if self.curve_start==None:
             self.distances = [np.sum(np.array([np.hypot(self.S_point[0]-self.E_point[0],self.S_point[1]-self.E_point[1])for self.E_point in self.points])) for self.S_point in tqdm(self.points)]
             self.working_index  = np.argmax(self.distances)
         else:
-            self.distances = [np.hypot(self.S_point[0]-curve_start[0],self.S_point[1]-curve_start[1]) for self.S_point in tqdm(self.points)]
+            self.distances = [np.hypot(self.S_point[0]-self.curve_start[0],self.S_point[1]-self.curve_start[1]) for self.S_point in tqdm(self.points)]
             self.working_index  = np.argmax(self.distances)
 
         for x in tqdm(range(len(self.points))):
@@ -152,19 +178,67 @@ class Region(object):
             self.new_curve = Curve(self.layer[index],self.next_curve_start)
             self.next_curve_start = self.new_curve.points[len(self.new_curve.points)]
             self.region_curves.append(self.new_curve)
-
-
+class Point(object):
+    def __init__(self, x, y):
+        self.x, self.y = x, y
+class Gui():
+    def __init__(self):
+        pass
 class Main():
     def __init__(self):
-        self.plotter = Plotter()
+        #self.plotter = Plotter()
         self.curves = []
         self.x_max=1000
         self.y_max=1000
+
+        self.rho = 28.0
+        self.sigma = 10.0
+        self.beta = 8.0 / 3.0
         self.output = np.zeros((1360,1360))
         self.mask = np.zeros((1360,1360))
+        self.circle_drawing_img = cv2.imread("Circle Drawing Test.jpg")
+        self.Circle_Drawing(self.circle_drawing_img)
+        #self.plotter.Spiral_level()
+        #self.Lorenz_Plot()
+
         #self.init_frame_img("Test Image.jpg")
         #self.init_frame_circles()
-        self.Circle_Drawing()
+        #self.Circle_Drawing()
+
+    def displacment(self, img, source, sink):
+        return -img[source[0], source[1]]/(np.hypot(source-sink))**2
+    def Circle_Drawing(self, img):
+        self.gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        self.centers = [Point(randint(0,self.gray.shape[0]-1),randint(0,self.gray.shape[1]-1)) for x in tqdm(range(2000))]
+        self.point_display = self.gray.copy()
+        for self.point in self.centers:
+            self.point_display[self.point.x,self.point.y] =255
+
+        cv2.imshow("Grey", self.gray)
+        cv2.imshow("Point origins", self.point_display)
+        cv2.waitKey(0)
+
+
+    def Lorenz_operator(self, state, t):
+        self.x, self.y, self.z = state  # Unpack the state vector
+        return self.sigma * (self.y - self.x), self.x * (self.rho - self.z) - self.y, self.x * self.y - self.beta * self.z
+    def Lorenz_Plot(self):
+        self.intervals = np.arange(0.0, 80.0, 0.005)
+        self.states = odeint(self.Lorenz_operator, [3.0, 3.0, 3.0], self.intervals)
+        self.coords = [self.states[:,0],self.states[:,1]]
+        print(np.min(self.coords), np.max(self.coords))
+        self.coords = self.coords+ abs(np.min(self.coords))
+        print(np.min(self.coords), np.max(self.coords))
+        self.coords = self.coords*(180/np.max(self.coords))
+        self.coords = np.round(self.coords,3)
+        print(np.min(self.coords), np.max(self.coords))
+        print(self.coords)
+        self.paired_points=[[self.coords[0][self.index],self.coords[1][self.index]] for self.index in range(len(self.coords[0]))]
+        self.plotter.Draw_Raw(self.paired_points)
+
+
+
+        return
 
     def init_frame_circles(self):
         self.output = np.zeros((1360,1360))
@@ -179,7 +253,7 @@ class Main():
         self.mask = 255-self.working_img
         self.output = cv2.Canny(self.mask,100,200)
 
-    def Circle_Drawing(self):
+    def Arc_Drawing(self):
         print("Computing path... Please wait.")
         #self.points = np.where(self.output!=0)
         #self.line_points=[[self.points[0][self.index],self.points[1][self.index]] for self.index in range(len(self.points[0]))]
