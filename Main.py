@@ -21,7 +21,7 @@ def SF(x,y,img):
         return 1
     else:
         return 0
-
+# this is a comment
 def SF2(x,y,img):
     region = np.array([mask[x-1,y-1],mask[x,y-1],mask[x+1,y-1],mask[x-1,y],mask[x+1,y],mask[x-1,y+1],mask[x,y+1],mask[x+1,y+1]])
     if np.sum(region)>5:
